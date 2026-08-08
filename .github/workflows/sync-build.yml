@@ -1,9 +1,15 @@
 name: Sync & Build APK
 
-# 一键：同步上游 → 保留本地修改(rebase) → 构建 APK → 上传 artifact
+# 一键：同步上游 → 保留本地修改(rebase) → 构建 APK → 上传 artifact / 发布 Release
 # 使用：Actions 页 → Sync & Build APK → Run workflow（分支选项随意，本工作流固定构建 feat/later-status-setting）
+#       tag 输入框：填写如 v5177 则同时发布 Release（手机浏览器可直接下载安装）；留空则仅上传 artifact
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布 Release 的版本号（如 v5177），留空则仅上传 artifact"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -60,9 +66,26 @@ jobs:
       - name: 构建 Release APK（versionCode = 提交数）
         run: flutter build apk --release --split-per-abi --build-number=$(git rev-list --count HEAD) --pub
 
+      - name: 重命名 APK
+        run: |
+          cd build/app/outputs/flutter-apk
+          for f in app-*-release.apk; do
+            abi=$(echo "$f" | sed -E 's|app-(.*)-release\.apk|\1|')
+            mv "$f" "PiliPlus_${abi}.apk"
+          done
+        shell: bash
+
+      - name: 发布 Release
+        if: ${{ github.event.inputs.tag != '' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.tag }}
+          files: build/app/outputs/flutter-apk/PiliPlus_*.apk
+
       - name: 上传 APK
         uses: actions/upload-artifact@v7
         with:
           name: PiliPlus_apk
-          path: build/app/outputs/flutter-apk/*-release.apk
+          path: build/app/outputs/flutter-apk/PiliPlus_*.apk
           if-no-files-found: error
