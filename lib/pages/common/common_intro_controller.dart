@@ -33,6 +33,10 @@ abstract class CommonIntroController extends GetxController
   // 是否稍后再看
   final RxBool hasLater = false.obs;
 
+  // 稍后再看状态查询版本号：手动操作(viewLater)或新查询都会递增，
+  // 使在途的旧查询结果失效，避免迟到响应覆盖用户刚做的操作
+  int _laterStatusVersion = 0;
+
   final Rx<List<VideoTagItem>?> videoTags = Rx<List<VideoTagItem>?>(null);
 
   bool isProcessing = false;
@@ -160,13 +164,16 @@ abstract class CommonIntroController extends GetxController
     if (!isLogin) {
       return;
     }
+    final version = ++_laterStatusVersion;
     final aid = IdUtils.bv2av(bvid);
     var page = 1;
     while (true) {
       final res = await UserHttp.seeYouLater(page: page, viewed: 0);
       if (res case Success(:final response)) {
         if (response.list?.any((item) => item.aid == aid) == true) {
-          hasLater.value = true;
+          if (version == _laterStatusVersion) {
+            hasLater.value = true;
+          }
           return;
         }
         final count = response.count ?? 0;
@@ -178,14 +185,19 @@ abstract class CommonIntroController extends GetxController
         return; // 查询失败时保留原值，不误改状态
       }
     }
-    hasLater.value = false;
+    if (version == _laterStatusVersion) {
+      hasLater.value = false;
+    }
   }
 
   Future<void> viewLater() async {
     final res = await (hasLater.value
         ? UserHttp.toViewDel(aids: IdUtils.bv2av(bvid).toString())
         : UserHttp.toViewLater(bvid: bvid));
-    if (res.isSuccess) hasLater.toggle();
+    if (res.isSuccess) {
+      _laterStatusVersion++; // 用户手动操作优先，使在途查询结果失效
+      hasLater.toggle();
+    }
   }
 }
 
