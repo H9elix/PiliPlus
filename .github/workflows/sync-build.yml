@@ -1,0 +1,68 @@
+name: Sync & Build APK
+
+# 一键：同步上游 → 保留本地修改(rebase) → 构建 APK → 上传 artifact
+# 使用：Actions 页 → Sync & Build APK → Run workflow（分支选项随意，本工作流固定构建 feat/later-status-setting）
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 代码迁出（完整历史）
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: feat/later-status-setting
+
+      - name: 同步上游并保留本地修改
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git remote add upstream https://github.com/bggRGjQaUbCoE/PiliPlus.git
+          git fetch upstream main
+          if ! git rebase upstream/main; then
+            echo "::error::rebase 冲突：上游改动与本地修改重叠，需要本地解决后重试"
+            echo "::error::  1) git checkout feat/later-status-setting"
+            echo "::error::  2) git fetch origin && git rebase origin/main"
+            echo "::error::  3) 解决冲突: git status → 编辑 → git add → git rebase --continue"
+            echo "::error::  4) git push -f fork feat/later-status-setting"
+            echo "::error::  5) 重新运行本 workflow"
+            exit 1
+          fi
+          git push origin HEAD:feat/later-status-setting --force
+
+      - name: 构建 Java 环境
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle*
+            android/**/gradle-wrapper.properties
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        id: flutter-action
+        with:
+          channel: stable
+          flutter-version-file: pubspec.yaml
+          cache: true
+
+      - name: Apply Patch
+        shell: pwsh
+        run: lib/scripts/patch.ps1 android
+
+      - name: 构建 Release APK（versionCode = 提交数）
+        run: flutter build apk --release --split-per-abi --build-number=$(git rev-list --count HEAD) --pub
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: PiliPlus_apk
+          path: build/app/outputs/flutter-apk/*-release.apk
+          if-no-files-found: error
